@@ -1,0 +1,89 @@
+const { SourceTextModule } = require("vm");
+const ftp = require("./ftp");
+const { stat } = require("fs");
+
+const jsonFormat = ["command"];
+
+class Server {
+  server = null;
+  port = null;
+  dgram = require("dgram");
+
+  //
+  constructor(port) {
+    this.server = this.dgram.createSocket("udp4");
+    this.port = port;
+    this.server.bind(port);
+  }
+
+  //
+  async command(c, file = null, fileName = null) {
+    switch (c) {
+      case "list":
+        const files = await ftp.listFiles();
+        let response = [];
+        files.forEach((file) => {
+          let fileObject = {
+            name: file.name,
+            type: file.type,
+            rights: file.rights,
+            size: file.size,
+            owner: file.owner,
+            group: file.group,
+            date: file.date,
+          };
+
+          response.push(fileObject);
+        });
+        return { resType: "list", data: response };
+      case "upload":
+        const status = await ftp.uploadFile(Buffer.from(file), fileName);
+
+        return { resType: "upload", data: status };
+      case "download":
+        const fileBuff = await ftp.downloadFile(fileName);
+
+        return { resType: "download", data: fileBuff };
+      case "delete":
+        let error = false;
+        await ftp.deleteFile(fileName).catch((err) => {
+          error = true;
+        });
+        if (error) {
+          return { resType: "delete", deleted: false };
+        }
+        return { resType: "delete", deleted: true };
+      default:
+        console.log("Command does not exists");
+        break;
+    }
+  }
+  start() {
+    this.server.on("message", async (message, info) => {
+      const data = JSON.parse(Buffer.from(message, "utf-8").toString("utf8"));
+      const hasFormat = jsonFormat.every((key) => data.hasOwnProperty(key));
+      if (!hasFormat) {
+        //Send error to client
+      } else {
+        //PASSED
+        const c = data.command;
+        const file = data.file;
+        const fileName = data.fileName;
+
+        const dataSvr = await this.command(c, file, fileName);
+        console.log(`[!] User: ${info.address}:${info.port} Action: ${c}`);
+        console.log("[*] Data: " + JSON.stringify(dataSvr));
+        this.server.send(JSON.stringify(dataSvr), info.port, info.address);
+      }
+    });
+    //
+    this.server.on("listening", () => {
+      const address = this.server.address();
+      console.log(
+        `Servidor de archivos UDP escuchando en ${address.address}:${address.port}`
+      );
+    });
+  }
+}
+
+module.exports = Server;
